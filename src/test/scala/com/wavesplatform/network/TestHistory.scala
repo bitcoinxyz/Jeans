@@ -1,7 +1,5 @@
 package com.wavesplatform.network
 
-import java.util.concurrent.locks.ReentrantReadWriteLock
-
 import com.wavesplatform.state2.ByteStr
 import scorex.block.Block.BlockId
 import scorex.block.{Block, BlockHeader, MicroBlock}
@@ -25,19 +23,19 @@ class TestHistory extends NgHistory {
 
   override def heightOf(blockId: ByteStr): Option[Int] = ???
 
-  override def lastBlockTimestamp(): Option[Long] = ???
-
   override def blockHeaderAndSizeAt(height: Int): Option[(BlockHeader, Int)] = ???
 
-  override def lastBlockId(): Option[ByteStr] = ???
-
-  override def blockAt(height: Int): Option[Block] = ???
-
-  override def height(): Int = ???
+  override def height: Int = ???
 
   override def scoreOf(id: ByteStr): Option[BlockchainScore] = ???
 
-  override def synchronizationToken: ReentrantReadWriteLock = ???
+  override def score = ???
 
-  override def close(): Unit = ???
+  override def lastBlock = ???
+
+  override def blockBytes(blockId: BlockId) = ???
+
+  override def blockIdsAfter(parentSignature: BlockId, howMany: Int) = ???
+
+  override def parent(ofBlock: Block, back: Int) = ???
 }

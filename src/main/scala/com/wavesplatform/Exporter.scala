@@ -34,7 +34,7 @@ object Exporter extends ScorexLogging {
     val tryHistory = HistoryWriterImpl(settings.blockchainSettings.blockchainFile, new ReentrantReadWriteLock(true), settings.blockchainSettings.functionalitySettings, settings.featuresSettings)
     tryHistory match {
       case Success(history) =>
-        val blockchainHeight = history.height()
+        val blockchainHeight = history.height
         val height = Math.min(blockchainHeight, exportHeight.getOrElse(blockchainHeight))
         log.info(s"Blockchain height is $blockchainHeight exporting to $height")
         val outputFilename = s"$outputFilenamePrefix-$height"

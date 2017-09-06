@@ -2,7 +2,9 @@ package com.wavesplatform
 
 import java.io.File
 import java.security.Security
+import java.util.Properties
 import java.util.concurrent.ConcurrentHashMap
+import javax.sql.DataSource
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
@@ -23,11 +25,13 @@ import com.wavesplatform.settings._
 import com.wavesplatform.state2.StateWriter
 import com.wavesplatform.state2.appender.{BlockAppender, CheckpointAppender, ExtensionAppender, MicroblockAppender}
 import com.wavesplatform.utils.{SystemInformationReporter, forceStopApplication}
+import com.zaxxer.hikari.{HikariConfig, HikariDataSource}
 import io.netty.channel.Channel
 import io.netty.channel.group.DefaultChannelGroup
 import io.netty.util.concurrent.GlobalEventExecutor
 import kamon.Kamon
 import monix.reactive.Observable
+import org.flywaydb.core.Flyway
 import org.influxdb.dto.Point
 import org.slf4j.bridge.SLF4JBridgeHandler
 import scorex.account.AddressScheme
@@ -46,7 +50,7 @@ import scala.concurrent.duration._
 import scala.reflect.runtime.universe._
 import scala.util.Try
 
-class Application(val actorSystem: ActorSystem, val settings: WavesSettings, configRoot: ConfigObject) extends ScorexLogging {
+class Application(val actorSystem: ActorSystem, val settings: WavesSettings, configRoot: ConfigObject, ds: DataSource) extends ScorexLogging {
 
   import monix.execution.Scheduler.Implicits.{global => scheduler}
 
@@ -68,7 +72,7 @@ class Application(val actorSystem: ActorSystem, val settings: WavesSettings, con
     }
 
   private val checkpointService = new CheckpointServiceImpl(settings.blockchainSettings.checkpointFile, settings.checkpointsSettings)
-  private val (history, featureProvider, stateWriter, stateReader, blockchainUpdater, blockchainDebugInfo, nodeApi) = StorageFactory(settings, nodeApiLauncher).get
+  private val (history, featureProvider, stateWriter, stateReader, blockchainUpdater, blockchainDebugInfo) = StorageFactory(settings, ds, NTP).get
   private lazy val upnp = new UPnP(settings.networkSettings.uPnPSettings) // don't initialize unless enabled
   private val wallet: Wallet = Wallet(settings.walletSettings)
   private val peerDatabase = new PeerDatabaseImpl(settings.networkSettings)
@@ -109,7 +113,7 @@ class Application(val actorSystem: ActorSystem, val settings: WavesSettings, con
     val network = NetworkServer(settings, lastBlockInfo, history, utxStorage, peerDatabase, allChannels, establishedConnections)
     val (signatures, blocks, blockchainScores, checkpoints, microblockInvs, microblockResponses, transactions) = network.messages
 
-    val syncWithChannelClosed = RxScoreObserver(settings.synchronizationSettings.scoreTTL, history.score(), lastScore, blockchainScores, network.closedChannels)
+    val syncWithChannelClosed = RxScoreObserver(settings.synchronizationSettings.scoreTTL, history.score, lastScore, blockchainScores, network.closedChannels)
     val microblockDatas = MicroBlockSynchronizer(settings.synchronizationSettings.microBlockSynchronizer, peerDatabase, lastBlockInfo.map(_.id), microblockInvs, microblockResponses)
     val newBlocks = RxExtensionLoader(settings.synchronizationSettings.maxRollback, settings.synchronizationSettings.synchronizationTimeout,
       history, peerDatabase, knownInvalidBlocks, blocks, signatures, syncWithChannelClosed) { case ((c, b)) => processFork(c, b.blocks) }
@@ -125,6 +129,8 @@ class Application(val actorSystem: ActorSystem, val settings: WavesSettings, con
     for (addr <- settings.networkSettings.declaredAddress if settings.networkSettings.uPnPSettings.enable) {
       upnp.addPort(addr.getPort)
     }
+
+    val nodeApi: Option[(Seq[Type], Seq[ApiRoute])] = ???
 
     // Start complete REST API. Node API is already running, so we need to re-bind
     nodeApi.foreach { case (tags, routes) =>
@@ -214,13 +220,6 @@ class Application(val actorSystem: ActorSystem, val settings: WavesSettings, con
 
       log.debug("Closing wallet")
       wallet.close()
-
-      log.debug("Closing state")
-      stateWriter.close()
-
-      log.debug("Closing history")
-      history.close()
-
       log.info("Shutdown complete")
     }
   }
@@ -281,6 +280,24 @@ object Application extends ScorexLogging {
     Kamon.start(config)
     val isMetricsStarted = Metrics.start(settings.metrics)
 
+    val props = new Properties()
+    props.put("url", s"jdbc:postgresql:waves")
+    val hc = new HikariConfig()
+    hc.setDataSourceClassName("org.postgresql.ds.PGSimpleDataSource")
+    hc.setUsername("phearnot")
+    hc.setDataSourceProperties(props)
+    val hds = new HikariDataSource(hc)
+    val flyway = new Flyway
+    flyway.setLocations("db/migration/postgresql")
+    flyway.setDataSource(hds)
+    flyway.migrate()
+    hc.setAutoCommit(false)
+
+    log.trace(s"System property sun.net.inetaddr.ttl=${System.getProperty("sun.net.inetaddr.ttl")}")
+    log.trace(s"System property sun.net.inetaddr.negative.ttl=${System.getProperty("sun.net.inetaddr.negative.ttl")}")
+    log.trace(s"Security property networkaddress.cache.ttl=${Security.getProperty("networkaddress.cache.ttl")}")
+    log.trace(s"Security property networkaddress.cache.negative.ttl=${Security.getProperty("networkaddress.cache.negative.ttl")}")
+
     RootActorSystem.start("wavesplatform", config) { actorSystem =>
       import actorSystem.dispatcher
       isMetricsStarted.foreach { started =>
@@ -307,7 +324,7 @@ object Application extends ScorexLogging {
 
       log.info(s"${Constants.AgentName} Blockchain Id: ${settings.blockchainSettings.addressSchemeCharacter}")
 
-      new Application(actorSystem, settings, config.root()) {
+      new Application(actorSystem, settings, config.root(), hds) {
         override def shutdown(): Unit = {
           Kamon.shutdown()
           Metrics.shutdown()

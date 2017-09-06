@@ -3,7 +3,6 @@ package com.wavesplatform.state2
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
 import cats.data.{NonEmptyList => NEL}
-import cats.implicits._
 import com.wavesplatform.features.{BlockchainFeatures, FeatureProvider}
 import com.wavesplatform.history.HistoryWriterImpl
 import com.wavesplatform.metrics.{Instrumented, TxsInBlockchainStats}
@@ -48,15 +47,15 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with SnapshotStateRea
   private val unsafeDiffByRange = BlockDiffer.unsafeDiffByRange(settings.blockchainSettings.functionalitySettings, featureProvider, historyWriter, maxTransactionsPerChunk) _
 
   private def heights(prefix: String): String = read { implicit l =>
-    s"$prefix, total persisted blocks: ${historyWriter.height()}, [ in-memory: ${inMemDiffs().toList.mkString(" | ")} ] + persisted: h=${persisted.height}"
+    s"$prefix, total persisted blocks: ${historyWriter.height}, [ in-memory: ${inMemDiffs().toList.mkString(" | ")} ] + persisted: h=${persisted.height}"
   }
 
   private def currentPersistedBlocksState: StateReader = Coeval(read { implicit l => composite(inMemDiffs(), persisted) })
 
-  def bestLiquidState: StateReader = composite(Coeval(read { implicit l => ngState().map(_.bestLiquidDiff).orEmpty }), currentPersistedBlocksState)
+  def bestLiquidState: SnapshotStateReader = ??? //composite(Coeval(read { implicit l => ngState().map(_.bestLiquidDiff).orEmpty }), currentPersistedBlocksState)
 
   def blockchainReady: Boolean = {
-    val lastBlock = historyReader.lastBlockTimestamp().get
+    val lastBlock = historyReader.lastBlockTimestamp.get
     lastBlock + maxBlockReadinessAge > time.correctedTime()
   }
 
@@ -66,31 +65,32 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with SnapshotStateRea
 
   // Store last block information in a cache
   historyReader.lastBlock.foreach { b =>
-    internalLastBlockInfo.onNext(LastBlockInfo(b.uniqueId, historyReader.height(), historyReader.score(), blockchainReady, System.currentTimeMillis))
+    internalLastBlockInfo.onNext(LastBlockInfo(b.uniqueId, historyReader.height, historyReader.score, blockchainReady, System.currentTimeMillis))
   }
 
   private[wavesplatform] def syncPersistedAndInMemory(): Unit = write { implicit l =>
     log.info(heights("State rebuild started"))
 
-    val notPersisted = historyWriter.height() - persisted.height
+    val notPersisted = historyWriter.height - persisted.height
     val inMemSize = Math.min(notPersisted, minBlocksInMemory)
-    val persistUpTo = historyWriter.height() - inMemSize + 1
+    val persistUpTo = historyWriter.height - inMemSize + 1
 
     val persistFrom = persisted.height + 1
     ranges(persistFrom, persistUpTo, rebuildByBlocks).foreach { case (_, last) =>
       val diffs = unsafeDiffByRange(persisted, last)
       log.debug(s"Diffs built for Range(${persisted.height + 1}, $last): $diffs")
-      diffs.toList.reverse.foreach(persisted.applyBlockDiff)
+//      diffs.toList.reverse.foreach(persisted.applyBlockDiff)
+      ???
     }
 
-    inMemDiffs.set(unsafeDiffByRange(persisted, historyWriter.height() + 1))
+    inMemDiffs.set(unsafeDiffByRange(persisted, historyWriter.height + 1))
     log.info(heights("State rebuild finished"))
   }
 
   private def displayFeatures(s: Set[Short]): String = s"FEATURE${if (s.size > 1) "S"} ${s.mkString(", ")}${if (s.size > 1) "HAVE BEEN" else "HAS BEEN"}"
 
   private def featuresApprovedWithBlock(block: Block): Set[Short] = {
-    val height = historyWriter.height() + 1
+    val height = historyWriter.height + 1
 
     if (height % settings.blockchainSettings.functionalitySettings.featureCheckBlocksPeriod == 0) {
 
@@ -127,7 +127,7 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with SnapshotStateRea
   }
 
   override def processBlock(block: Block): Either[ValidationError, Option[DiscardedTransactions]] = write { implicit l =>
-    val height = historyWriter.height()
+    val height = historyWriter.height
     val notImplementedFeatures = featureProvider.activatedFeatures(height).diff(BlockchainFeatures.implemented)
 
     Either.cond(!settings.featuresSettings.autoShutdownOnUnsupportedFeature || notImplementedFeatures.isEmpty, (),
@@ -174,7 +174,8 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with SnapshotStateRea
                       inMemDiffs.transform { imd =>
                         val withPrepended = prependCompactBlockDiff(referencedLiquidDiff, imd, maxTransactionsPerChunk)
                         val (inMem, toPersist: immutable.Seq[BlockDiff]) = splitAfterThreshold(withPrepended, minBlocksInMemory)(_.heightDiff)
-                        toPersist.reverse.foreach(persisted.applyBlockDiff)
+//                        toPersist.reverse.foreach(persisted.applyBlockDiff)
+                        ???
                         inMem
                       }
                       log.info(heights("After block application"))
@@ -188,10 +189,10 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with SnapshotStateRea
             }
       }).map {
         _ map { case ((newBlockDiff, discarded)) =>
-          val height = historyWriter.height() + 1
+          val height = historyWriter.height + 1
           ngState.set(Some(new NgState(block, newBlockDiff, featuresApprovedWithBlock(block))))
-          historyReader.lastBlockId().foreach(id =>
-            internalLastBlockInfo.onNext(LastBlockInfo(id, historyReader.height(), historyReader.score(), blockchainReady, System.currentTimeMillis)))
+          historyReader.lastBlockId.foreach(id =>
+            internalLastBlockInfo.onNext(LastBlockInfo(id, historyReader.height, historyReader.score, blockchainReady, System.currentTimeMillis)))
           log.info(s"$block appended. New height: $height)")
           discarded
         }
@@ -212,7 +213,7 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with SnapshotStateRea
           val discardedNgBlock = ng.map(_.bestLiquidBlock)
           ngState.set(None)
 
-          val baseRolledBack = requestedHeight < historyWriter.height()
+          val baseRolledBack = requestedHeight < historyWriter.height
           val discardedHistoryBlocks = if (baseRolledBack) {
             log.info(s"Rollback to h=$requestedHeight started")
             val discarded = {
@@ -223,7 +224,8 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with SnapshotStateRea
             }
             if (requestedHeight < persisted.height) {
               log.info(s"Rollback to h=$requestedHeight requested. Persisted height=${persisted.height}, will drop state and reapply blockchain now")
-              persisted.clear()
+//              persisted.clear()
+              ???
               syncPersistedAndInMemory()
             } else if (requestedHeight == persisted.height) {
               inMemDiffs.set(NEL.one(BlockDiff.empty))
@@ -243,7 +245,7 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with SnapshotStateRea
 
           val totalDiscardedBlocks: Seq[Block] = discardedHistoryBlocks ++ discardedNgBlock.toSeq
           if (totalDiscardedBlocks.nonEmpty) internalLastBlockInfo.onNext(
-            LastBlockInfo(blockId, historyReader.height(), historyReader.score(), blockchainReady, System.currentTimeMillis))
+            LastBlockInfo(blockId, historyReader.height, historyReader.score, blockchainReady, System.currentTimeMillis))
           TxsInBlockchainStats.record(-totalDiscardedBlocks.size)
           Right(totalDiscardedBlocks)
       }
@@ -274,7 +276,7 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with SnapshotStateRea
               log.info(s"$microBlock appended")
               val now = System.currentTimeMillis
               ng.append(microBlock, diff, now)
-              internalLastBlockInfo.onNext(LastBlockInfo(microBlock.totalResBlockSig, historyReader.height(), historyReader.score(), ready = true, now))
+              internalLastBlockInfo.onNext(LastBlockInfo(microBlock.totalResBlockSig, historyReader.height, historyReader.score, ready = true, now))
             }
         }
     }
@@ -288,7 +290,7 @@ class BlockchainUpdaterImpl private(persisted: StateWriter with SnapshotStateRea
     )
   }
 
-  override def persistedAccountPortfoliosHash(): Int = Hash.accountPortfolios(currentPersistedBlocksState().accountPortfolios)
+  override def persistedAccountPortfoliosHash(): Int = ???
 }
 
 object BlockchainUpdaterImpl extends ScorexLogging {

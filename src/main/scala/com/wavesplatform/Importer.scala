@@ -33,7 +33,7 @@ object Importer extends ScorexLogging {
           case Success(inputStream) =>
             deleteFile(settings.blockchainSettings.blockchainFile)
             deleteFile(settings.blockchainSettings.stateFile)
-            val (history, _, stateWriter, _, blockchainUpdater, _, _) = StorageFactory(settings).get
+            val (history, _, stateWriter, _, blockchainUpdater, _) = StorageFactory(settings, ???, ???).get
             checkGenesis(history, settings, blockchainUpdater)
             val bis = new BufferedInputStream(inputStream)
             var quit = false
@@ -53,8 +53,6 @@ object Importer extends ScorexLogging {
             }
             bis.close()
             inputStream.close()
-            stateWriter.close()
-            history.close()
             val duration = System.currentTimeMillis() - start
             log.info(s"Imported in ${humanReadableDuration(duration)}")
           case Failure(ex) => log.error(s"Failed to open file '$filename")

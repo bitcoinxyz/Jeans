@@ -7,8 +7,7 @@ import com.wavesplatform.history.HistoryWriterImpl
 import com.wavesplatform.http.ApiMarshallers._
 import com.wavesplatform.settings.FunctionalitySettings
 import com.wavesplatform.state2._
-import com.wavesplatform.state2.reader.{SnapshotStateReader}
-import monix.eval.Coeval
+import com.wavesplatform.state2.reader.SnapshotStateReader
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.prop.PropertyChecks
 import play.api.libs.json.JsObject
@@ -24,7 +23,7 @@ class ConsensusRouteSpec extends RouteSpec("/consensus") with RestAPISettingsHel
   appendGenesisBlock(history)
   for (i <- 1 to 10) appendTestBlock(history)
 
-  private val route = NxtConsensusApiRoute(restAPISettings, Coeval.now(state), history, FunctionalitySettings.TESTNET).route
+  private val route = NxtConsensusApiRoute(restAPISettings, state, history, FunctionalitySettings.TESTNET).route
 
   routePath("/generationsignature") - {
     "for last block" in {

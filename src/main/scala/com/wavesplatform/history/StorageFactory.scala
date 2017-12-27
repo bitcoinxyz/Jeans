@@ -15,15 +15,10 @@ import scala.util.Try
 
 object StorageFactory {
 
-  def apply(settings: WavesSettings, ds: DataSource, time: Time): Try[(NgHistory with DebugNgHistory, FeatureProvider, StateWriter, SnapshotStateReader, BlockchainUpdater, BlockchainDebugInfo)] = {
-    val lock = new RWL(true)
-    for {
-      historyWriter <- HistoryWriterImpl(settings.blockchainSettings.blockchainFile, lock, settings.blockchainSettings.functionalitySettings, settings.featuresSettings)
-      stateWriter = new SQLiteWriter(ds)
-    } yield {
-      val bcu = BlockchainUpdaterImpl(stateWriter, historyWriter, settings, time, lock)
-      val history: NgHistory with DebugNgHistory with FeatureProvider = bcu.historyReader
-      (history, history, stateWriter, bcu.bestLiquidState, bcu, bcu)
-    }
+  def apply(settings: WavesSettings, ds: DataSource, time: Time): (NgHistory with DebugNgHistory, StateWriter with SnapshotStateReader, BlockchainUpdater, BlockchainDebugInfo) = {
+    val stateWriter = new SQLiteWriter(ds)
+    val bcu = new BlockchainUpdaterImpl(stateWriter, settings, time, ???)
+    val history: NgHistory with DebugNgHistory with FeatureProvider = bcu.historyReader
+    (history, history, stateWriter, bcu.bestLiquidState, bcu, bcu)
   }
 }

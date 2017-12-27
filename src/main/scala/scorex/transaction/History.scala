@@ -1,5 +1,6 @@
 package scorex.transaction
 
+import com.wavesplatform.features.FeatureProvider
 import com.wavesplatform.network.{BlockCheckpoint, Checkpoint}
 import com.wavesplatform.state2.ByteStr
 import scorex.block.Block.BlockId
@@ -9,7 +10,7 @@ import scorex.transaction.History.{BlockMinerInfo, BlockchainScore}
 
 import scala.util.Try
 
-trait History {
+trait History extends FeatureProvider {
   def height: Int
 
   def score: BlockchainScore
